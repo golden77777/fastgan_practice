@@ -1,0 +1,10 @@
+{
+  "path": "../lmdbs/ffhq",
+  "cuda": 0,
+  "name": "trial_ffhq_full_512_1",
+  "iter": 100000,
+  "start_iter": 0,
+  "batch_size": 16,
+  "im_size": 512,
+  "ckpt": "None"
+}
