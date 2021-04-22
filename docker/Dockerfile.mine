@@ -1,0 +1,33 @@
+FROM us-docker.pkg.dev/replicate/odegeasslbc/fastgan:gpu
+
+RUN apt-get update && apt-get install -y \
+	sudo \
+	wget \
+	vim \
+	git \
+	zip
+
+RUN pip install --upgrade pip && pip install \
+	jupyterlab \
+	ipywidgets \
+	matplotlib \
+	pandas \
+	lightweight-gan \
+	gdown \
+	natsort
+
+# nodejsのインストール方法
+RUN apt -y install curl dirmngr apt-transport-https lsb-release ca-certificates
+RUN curl -sL https://deb.nodesource.com/setup_12.x | sudo -E bash -
+RUN apt-get install -y nodejs
+
+# kite install kiteはインストーラーもダウンロードしなきゃいけないので面倒くさかった
+#RUN pip install jupyter-kite
+#RUN jupyter labextension install "@kiteco/jupyterlab-kite"
+
+# lsp install
+RUN pip install jupyter-lsp \
+	python-language-server
+RUN jupyter labextension install @krassowski/jupyterlab-lsp
+
+ENTRYPOINT ["/bin/bash"]
