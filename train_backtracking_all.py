@@ -20,7 +20,6 @@ percept = lpips.PerceptualLoss(model='net-lin', net='vgg', use_gpu=True)
 
 #torch.backends.cudnn.benchmark = True
 
-
 def crop_image_by_part(image, part):
     hw = image.shape[2]//2
     if part==0:
@@ -48,7 +47,7 @@ def train_d(net, data, label="real"):
         err = F.relu( torch.rand_like(pred) * 0.2 + 0.8 + pred).mean()
         err.backward()
         return pred.mean().item()
-        
+
 @torch.no_grad()
 def interpolate(z1, z2, netG, img_name, step=8):
     z = [  a*z2 + (1-a)*z1 for a in torch.linspace(0, 1, steps=step)  ]
@@ -75,7 +74,7 @@ def train(args):
     current_iteration = 0
     save_interval = 100
     saved_model_folder, saved_image_folder = get_dir(args)
-    
+
     device = torch.device("cpu")
     if use_cuda:
         device = torch.device("cuda:0")
@@ -87,16 +86,16 @@ def train(args):
             transforms.Normalize(mean=[0.5, 0.5, 0.5], std=[0.5, 0.5, 0.5])
         ]
     trans = transforms.Compose(transform_list)
-    
+
     dataset = ImageFolder(root=data_root, transform=trans, return_idx=True)
     dataloader = iter(DataLoader(dataset, batch_size=batch_size, shuffle=False,
                       sampler=InfiniteSamplerWrapper(dataset), num_workers=dataloader_workers, pin_memory=True))
 
     total_iterations = int(len(dataset)*100/batch_size)
-    
+
     netG = Generator(ngf=ngf, nz=nz, im_size=im_size)
 
-    
+
     ckpt = torch.load(checkpoint)
     load_params( netG , ckpt['g_ema'] )
     #netG.eval()
@@ -113,7 +112,7 @@ def train(args):
         real_image = real_image.to(device)
 
         optimizerG.zero_grad()
-        
+
         select_noise = fixed_noise[noise_idx]
         g_image = netG(select_noise)[0]
 
@@ -130,18 +129,18 @@ def train(args):
             log_rec_loss = 0
 
         if iteration % (save_interval*10) == 0:
-            
+
             with torch.no_grad():
                 vutils.save_image( torch.cat([
                         real_image, g_image]).add(1).mul(0.5), saved_image_folder+'/rec_%d.jpg'%iteration , nrow=batch_size)
 
                 interpolate(fixed_noise[0], fixed_noise[1], netG, saved_image_folder+'/interpolate_0_1_%d.jpg'%iteration)
-        
+
         if iteration % (save_interval*10) == 0 or iteration == total_iterations:
             torch.save(fixed_noise, saved_model_folder+'/%d.pth'%iteration)
-            
+
     dataloader = DataLoader(dataset, batch_size=batch_size, shuffle=False, num_workers=dataloader_workers, pin_memory=True)
-    
+
     mean_lpips = 0
     for idx, data in enumerate(dataloader):
         real_image, noise_idx = data
@@ -150,11 +149,11 @@ def train(args):
         select_noise = fixed_noise[noise_idx]
         g_image = netG(select_noise)[0]
 
-        rec_loss = percept( F.avg_pool2d( g_image, 2, 2), F.avg_pool2d(real_image,2,2) ).sum() 
+        rec_loss = percept( F.avg_pool2d( g_image, 2, 2), F.avg_pool2d(real_image,2,2) ).sum()
         mean_lpips += rec_loss.sum()
     mean_lpips /= len(dataset)
     print(mean_lpips)
-    
+
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description='region gan')
