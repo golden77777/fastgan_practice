@@ -41,7 +41,17 @@ class Reshape(nn.Module):
 
     def forward(self, feat):
         batch = feat.shape[0]
-        return feat.view(batch, *self.target_shape)        
+        return feat.view(batch, *self.target_shape)
+
+
+class SEBlockConditional(SEBlock):
+    def __init__(self,*args,n_domains=2,**kargs):
+        super().__init__(*args,**kargs)
+        self.forward = self.main
+
+@torch.jit.script
+def excitation(feat_small, feat_big ,condition_code):
+  return feat_big * torch.cat([feat_small,condition_code],dim=1)
 
 
 class GLU(nn.Module):
@@ -75,13 +85,34 @@ class SEBlock(nn.Module):
     def __init__(self, ch_in, ch_out):
         super().__init__()
 
-        self.main = nn.Sequential(  nn.AdaptiveAvgPool2d(4), 
+        self.main = nn.Sequential(  nn.AdaptiveAvgPool2d(4),
                                     conv2d(ch_in, ch_out, 4, 1, 0, bias=False), Swish(),
                                     conv2d(ch_out, ch_out, 1, 1, 0, bias=False), nn.Sigmoid() )
 
     def forward(self, feat_small, feat_big):
         return feat_big * self.main(feat_small)
 
+
+class SEBlockConditional(SEBlock):
+    def __init__(self,*args,n_domains=2,**kargs):
+        super().__init__(*args,**kargs)
+    def forward(self, feat_small, feat_big ,condition_code):
+      return excitation(self.main(feat_small), feat_big, condition_code)
+
+@torch.jit.script
+def excitation(feat_small, feat_big ,condition_code):
+  return feat_big * torch.cat([feat_small,condition_code],dim=1)
+
+
+class SEBlockConditional(SEBlock):
+    def __init__(self,*args,n_domains=2,**kargs):
+        super().__init__(*args,**kargs)
+    def forward(self, feat_small, feat_big ,condition_code):
+      return excitation(self.main(feat_small), feat_big, condition_code)
+
+@torch.jit.script
+def excitation(feat_small, feat_big ,condition_code):
+  return feat_big * torch.cat([feat_small,condition_code],dim=1)
 
 class InitLayer(nn.Module):
     def __init__(self, nz, channel):
@@ -129,29 +160,29 @@ class Generator(nn.Module):
         self.im_size = im_size
 
         self.init = InitLayer(nz, channel=nfc[4])
-                                
+
         self.feat_8   = UpBlockComp(nfc[4], nfc[8])
         self.feat_16  = UpBlock(nfc[8], nfc[16])
         self.feat_32  = UpBlockComp(nfc[16], nfc[32])
         self.feat_64  = UpBlock(nfc[32], nfc[64])
-        self.feat_128 = UpBlockComp(nfc[64], nfc[128])  
-        self.feat_256 = UpBlock(nfc[128], nfc[256]) 
+        self.feat_128 = UpBlockComp(nfc[64], nfc[128])
+        self.feat_256 = UpBlock(nfc[128], nfc[256])
 
         self.se_64  = SEBlock(nfc[4], nfc[64])
         self.se_128 = SEBlock(nfc[8], nfc[128])
         self.se_256 = SEBlock(nfc[16], nfc[256])
 
-        self.to_128 = conv2d(nfc[128], nc, 1, 1, 0, bias=False) 
-        self.to_big = conv2d(nfc[im_size], nc, 3, 1, 1, bias=False) 
-        
+        self.to_128 = conv2d(nfc[128], nc, 1, 1, 0, bias=False)
+        self.to_big = conv2d(nfc[im_size], nc, 3, 1, 1, bias=False)
+
         if im_size > 256:
-            self.feat_512 = UpBlockComp(nfc[256], nfc[512]) 
+            self.feat_512 = UpBlockComp(nfc[256], nfc[512])
             self.se_512 = SEBlock(nfc[32], nfc[512])
         if im_size > 512:
-            self.feat_1024 = UpBlock(nfc[512], nfc[1024])  
-        
+            self.feat_1024 = UpBlock(nfc[512], nfc[1024])
+
     def forward(self, input):
-        
+
         feat_4   = self.init(input)
         feat_8   = self.feat_8(feat_4)
         feat_16  = self.feat_16(feat_8)
@@ -165,7 +196,7 @@ class Generator(nn.Module):
 
         if self.im_size == 256:
             return [self.to_big(feat_256), self.to_128(feat_128)]
-        
+
         feat_512 = self.se_512( feat_32, self.feat_512(feat_256) )
         if self.im_size == 512:
             return [self.to_big(feat_512), self.to_128(feat_128)]
@@ -176,6 +207,84 @@ class Generator(nn.Module):
         im_1024 = torch.tanh(self.to_big(feat_1024))
 
         return [im_1024, im_128]
+
+class GeneratorConditional(nn.Module):
+    def __init__(self, ngf=64, nz=100, nc=3, im_size=1024,n_conditions=2):
+        super(GeneratorConditional, self).__init__()
+
+        nfc_multi = {4:16, 8:8, 16:4, 32:2, 64:2, 128:1, 256:0.5, 512:0.25, 1024:0.125}
+        nfc = {}
+        for k, v in nfc_multi.items():
+            nfc[k] = int(v*ngf)
+
+        self.im_size = im_size
+        self.n_conditions = n_conditions
+
+        self.init = InitLayer(nz+n_conditions, channel=nfc[4])
+
+        self.feat_8   = UpBlockComp(nfc[4]+n_conditions, nfc[8])
+        self.feat_16  = UpBlock(nfc[8]+n_conditions, nfc[16])
+        self.feat_32  = UpBlockComp(nfc[16]+n_conditions, nfc[32])
+        self.feat_64  = UpBlock(nfc[32], nfc[64]+n_conditions)
+        self.feat_128 = UpBlockComp(nfc[64]+n_conditions, nfc[128]+n_conditions)
+        self.feat_256 = UpBlock(nfc[128]+n_conditions, nfc[256]+n_conditions)
+
+        self.se_64  = SEBlockConditional(nfc[4], nfc[64])
+        self.se_128 = SEBlockConditional(nfc[8], nfc[128])
+        self.se_256 = SEBlockConditional(nfc[16], nfc[256])
+
+        self.to_128 = conv2d(nfc[128]+n_conditions, nc, 1, 1, 0, bias=False)
+        self.to_big = conv2d(nfc[im_size]+n_conditions, nc, 3, 1, 1, bias=False)
+
+        if im_size > 256:
+            self.feat_512 = UpBlockComp(nfc[256], nfc[512]+n_conditions)
+            self.se_512 = SEBlockConditional(nfc[32], nfc[512])
+        if im_size > 512:
+            self.feat_1024 = UpBlock(nfc[512]+n_conditions, nfc[1024])
+
+
+
+
+    def forward(self,input,condition_code):
+        feat_4   = self.init(torch.cat([input,condition_code],dim=1))
+
+        condition_fm_seed = condition_code.view(-1, self.n_conditions, 1,1)
+
+        condition_fm = condition_fm_seed.expand(-1,-1,4,4)
+
+        feat_8   = self.feat_8(torch.cat([feat_4,condition_fm],dim=1))
+
+        condition_fm = condition_fm_seed.expand(-1,-1,8,8)
+        feat_16  = self.feat_16(torch.cat([feat_8,condition_fm],dim=1))
+
+        condition_fm = condition_fm_seed.expand(-1,-1,16,16)
+        feat_32  = self.feat_32(torch.cat([feat_16,condition_fm],dim=1))
+
+        feat_64  = self.se_64( feat_4, self.feat_64(feat_32) ,condition_fm_seed)
+
+        feat_128 = self.se_128( feat_8, self.feat_128(feat_64) ,condition_fm_seed)
+
+        feat_256 = self.se_256( feat_16, self.feat_256(feat_128) ,condition_fm_seed)
+
+        if self.im_size == 256:
+            im_256 = torch.tanh(self.to_big(feat_256))
+            im_128 = torch.tanh(self.to_128(feat_128))
+            return [im_256 , im_128]
+
+        feat_512 = self.se_512( feat_32, self.feat_512(feat_256),condition_fm_code )
+
+        if self.im_size == 512:
+            im_512 = torch.tanh(self.to_big(feat_512))
+            im_128 = torch.tanh(self.to_128(feat_128))
+            return [im_512 , im_128]
+
+        feat_1024 = self.feat_1024(torch.cat([feat_512,condition_code],dim=1))
+
+        im_128 = torch.tanh(self.to_128(feat_128))
+        im_1024 = torch.tanh(self.to_big(feat_1024))
+
+        return [im_1024,im_128]
+
 
 
 class DownBlock(nn.Module):
@@ -223,18 +332,18 @@ class Discriminator(nn.Module):
             nfc[k] = int(v*ndf)
 
         if im_size == 1024:
-            self.down_from_big = nn.Sequential( 
+            self.down_from_big = nn.Sequential(
                                     conv2d(nc, nfc[1024], 4, 2, 1, bias=False),
                                     nn.LeakyReLU(0.2, inplace=True),
                                     conv2d(nfc[1024], nfc[512], 4, 2, 1, bias=False),
                                     batchNorm2d(nfc[512]),
                                     nn.LeakyReLU(0.2, inplace=True))
         elif im_size == 512:
-            self.down_from_big = nn.Sequential( 
+            self.down_from_big = nn.Sequential(
                                     conv2d(nc, nfc[512], 4, 2, 1, bias=False),
                                     nn.LeakyReLU(0.2, inplace=True) )
         elif im_size == 256:
-            self.down_from_big = nn.Sequential( 
+            self.down_from_big = nn.Sequential(
                                     conv2d(nc, nfc[512], 4, 2, 1, bias=False),
                                     nn.LeakyReLU(0.2, inplace=True) )
 
@@ -253,9 +362,9 @@ class Discriminator(nn.Module):
         self.se_2_16 = SEBlock(nfc[512], nfc[64])
         self.se_4_32 = SEBlock(nfc[256], nfc[32])
         self.se_8_64 = SEBlock(nfc[128], nfc[16])
-        
-        self.down_from_small = nn.Sequential( 
-                                            conv2d(nc, nfc[256], 4, 2, 1, bias=False), 
+
+        self.down_from_small = nn.Sequential(
+                                            conv2d(nc, nfc[256], 4, 2, 1, bias=False),
                                             nn.LeakyReLU(0.2, inplace=True),
                                             DownBlock(nfc[256],  nfc[128]),
                                             DownBlock(nfc[128],  nfc[64]),
@@ -269,21 +378,21 @@ class Discriminator(nn.Module):
         if im_size>256:
             self.decoder_part = SimpleDecoder(nfc[32], nc)
         self.decoder_small = SimpleDecoder(nfc[32], nc)
-        
+
     def forward(self, imgs, label):
         if type(imgs) is not list:
             imgs = [F.interpolate(imgs, size=self.im_size), F.interpolate(imgs, size=128)]
 
-        feat_2 = self.down_from_big(imgs[0])        
+        feat_2 = self.down_from_big(imgs[0])
         feat_4 = self.down_4(feat_2)
         feat_8 = self.down_8(feat_4)
-        
+
         feat_16 = self.down_16(feat_8)
         feat_16 = self.se_2_16(feat_2, feat_16)
 
         feat_32 = self.down_32(feat_16)
         feat_32 = self.se_4_32(feat_4, feat_32)
-        
+
         feat_last = self.down_64(feat_32)
         feat_last = self.se_8_64(feat_8, feat_last)
 
@@ -292,7 +401,7 @@ class Discriminator(nn.Module):
         feat_small = self.down_from_small(imgs[1])
         rf_1 = self.rf_small(feat_small).view(-1)
 
-        if label=='real':    
+        if label=='real':
             rec_img_big = self.decoder_big(feat_last)
             rec_img_small = self.decoder_small(feat_small)
 
@@ -311,9 +420,9 @@ class Discriminator(nn.Module):
             else:
                 rec_img_part = rec_img_big
                 part = 1
-            return torch.cat([rf_0, rf_1]) , [rec_img_big, rec_img_small, rec_img_part], part 
+            return torch.cat([rf_0, rf_1]) , [rec_img_big, rec_img_small, rec_img_part], part
 
-        return torch.cat([rf_0, rf_1]) 
+        return torch.cat([rf_0, rf_1])
 
 
 class SimpleDecoder(nn.Module):
@@ -363,8 +472,8 @@ class TextureDiscriminator(nn.Module):
         for k, v in nfc_multi.items():
             nfc[k] = int(v*ndf)
 
-        self.down_from_small = nn.Sequential( 
-                                            conv2d(nc, nfc[256], 4, 2, 1, bias=False), 
+        self.down_from_small = nn.Sequential(
+                                            conv2d(nc, nfc[256], 4, 2, 1, bias=False),
                                             nn.LeakyReLU(0.2, inplace=True),
                                             DownBlock(nfc[256],  nfc[128]),
                                             DownBlock(nfc[128],  nfc[64]),
@@ -373,14 +482,14 @@ class TextureDiscriminator(nn.Module):
                             conv2d(nfc[16], 1, 4, 1, 0, bias=False))
 
         self.decoder_small = SimpleDecoder(nfc[32], nc)
-        
+
     def forward(self, img, label):
         img = random_crop(img, size=128)
 
         feat_small = self.down_from_small(img)
         rf = self.rf_small(feat_small).view(-1)
-        
-        if label=='real':    
+
+        if label=='real':
             rec_img_small = self.decoder_small(feat_small)
 
             return rf, rec_img_small, img
