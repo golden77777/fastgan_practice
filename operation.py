@@ -67,7 +67,7 @@ class InfiniteWeightedSamplerWrapper(data.sampler.Sampler):
         weight_per_class = [0.] * nclasses
         N = float(sum(count))
         for i in range(nclasses):
-            weight_per_class[i] = N/float(count[i])
+            weight_per_class[i] = N/(float(count[i]) + 0.0001)
         weight = [0] * len(targets)
         for idx, val in enumerate(targets):
             weight[idx] = weight_per_class[val]

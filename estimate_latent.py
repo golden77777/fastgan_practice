@@ -73,7 +73,7 @@ if __name__ == "__main__":
         ]
     trans = transforms.Compose(transform_list)
     dataset = ImageFolder(root='images2', transform=trans)
-    #dataloader = iter(DataLoader(dataset, batch_size=batch_size shuffle=False, sampler=InfiniteSamplerWrapper(dataset), num_workers=dataloader_workers, pin_memory=True))
+    dataloader = iter(DataLoader(dataset, batch_size=batch_size, shuffle=False, sampler=InfiniteWeightedSamplerWrapper(dataset), num_workers=dataloader_workers, pin_memory=True))
     mse = torch.nn.MSELoss(size_average=None, reduce=None, reduction='mean')
     for epoch in [10000*i for i in range(args.start_iter, args.end_iter+1)]:
         #ckpt = './models/%d.pth'%(epoch)
@@ -93,13 +93,13 @@ if __name__ == "__main__":
         net_ig.eval()
         for i, (target_image, (path, category)) in enumerate(zip(dataloader,dataset.samples)):
             # noiseごとにcondition0,1の画像を作成
-            noise = torch.randn(args.batch, noise_dim).to(device).requires_grad_(True)
+            noise = torch.randn(50, noise_dim).to(device).requires_grad_(True)
 
             for condition in [0,1]:
                 if condition == 0:
-                    condition_code = F.one_hot(torch.zeros((args.batch,),dtype=torch.int64),num_classes=2).to(device)
+                    condition_code = F.one_hot(torch.zeros((50,),dtype=torch.int64),num_classes=2).to(device)
                 else :
-                    condition_code = F.one_hot(torch.ones((args.batch,),dtype=torch.int64),num_classes=2).to(device)
+                    condition_code = F.one_hot(torch.ones((50,),dtype=torch.int64),num_classes=2).to(device)
 
                 dist = 'eval_condition=%d_%d'%(condition,epoch)
                 dist = os.path.join(dist, 'img')
