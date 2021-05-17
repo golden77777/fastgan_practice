@@ -5,6 +5,7 @@ import torch.nn.functional as F
 from torchvision.datasets import ImageFolder
 from torch.utils.data import DataLoader
 from torchvision import utils as vutils
+from torchvision import transforms
 
 import os
 import random
@@ -53,7 +54,7 @@ if __name__ == "__main__":
     parser.add_argument('--n_sample', type=int, default=2000)
     parser.add_argument('--big', action='store_true')
     parser.add_argument('--im_size', type=int, default=1024)
-#     parser.add_argument('--condition', type=int, default=0)
+    parser.add_argument('--condition', type=int, default=0)
     parser.set_defaults(big=False)
     args = parser.parse_args()
     batch_size = 1
@@ -72,8 +73,7 @@ if __name__ == "__main__":
         ]
     trans = transforms.Compose(transform_list)
     dataset = ImageFolder(root=src, transform=trans)
-    dataloader = iter(DataLoader(dataset, batch_size=batch_size shuffle=False,
-                      sampler=InfiniteSamplerWrapper(dataset), num_workers=dataloader_workers, pin_memory=True))
+    #dataloader = iter(DataLoader(dataset, batch_size=batch_size shuffle=False, sampler=InfiniteSamplerWrapper(dataset), num_workers=dataloader_workers, pin_memory=True))
 
     mse = torch.nn.MSELoss(size_average=None, reduce=None, reduction='mean')
     for epoch in [10000*i for i in range(args.start_iter, args.end_iter+1)]:

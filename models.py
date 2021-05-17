@@ -44,10 +44,25 @@ class Reshape(nn.Module):
         return feat.view(batch, *self.target_shape)
 
 
+class SEBlock(nn.Module):
+    def __init__(self, ch_in, ch_out):
+        super().__init__()
+
+        self.main = nn.Sequential(  nn.AdaptiveAvgPool2d(4),
+                                    conv2d(ch_in, ch_out, 4, 1, 0, bias=False), Swish(),
+                                    conv2d(ch_out, ch_out, 1, 1, 0, bias=False), nn.Sigmoid() )
+
+    def forward(self, feat_small, feat_big):
+        return feat_big * self.main(feat_small)
+
+
 class SEBlockConditional(SEBlock):
     def __init__(self,*args,n_domains=2,**kargs):
         super().__init__(*args,**kargs)
-        self.forward = self.main
+
+    def forward(self, feat_small, feat_big ,condition_code):
+        return feat_big * torch.cat([self.main(feat_small),condition_code],dim=1)
+
 
 @torch.jit.script
 def excitation(feat_small, feat_big ,condition_code):

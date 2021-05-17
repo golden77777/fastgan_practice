@@ -20,7 +20,6 @@ def InfiniteSampler(n):
             order = np.random.permutation(n)
             i = 0
 
-
 class InfiniteSamplerWrapper(data.sampler.Sampler):
     """Data sampler wrapper"""
     def __init__(self, data_source):
@@ -32,11 +31,53 @@ class InfiniteSamplerWrapper(data.sampler.Sampler):
     def __len__(self):
         return 2 ** 31
 
+def InfiniteWeightedSampler(weights,num_samples):
+    """Data sampler"""
+    i = num_samples - 1
+    weights = torch.DoubleTensor(weights)
+    order = torch.multinomial(weights,num_samples,replacement=True)
+
+    while True:
+        yield order[i]
+        i += 1
+        if i >= num_samples:
+            np.random.seed()
+            order = torch.multinomial(weights,num_samples,replacement=True)
+            i = 0
+
+class InfiniteWeightedSamplerWrapper(data.sampler.Sampler):
+    """Data sampler wrapper"""
+    def __init__(self, data_source):
+        self.num_samples = len(data_source)
+
+        targets = data_source.targets
+        nclasses = max(targets) + 1
+        self.weights = self.make_weights_for_balanced_classes(targets,nclasses)
+
+    def __iter__(self):
+        return iter(InfiniteWeightedSampler(self.weights,self.num_samples))
+
+    def __len__(self):
+        return 2 ** 31
+
+    def make_weights_for_balanced_classes(self,targets,nclasses):
+        count = [0] * nclasses
+        for item in targets:
+            count[item] += 1
+        weight_per_class = [0.] * nclasses
+        N = float(sum(count))
+        for i in range(nclasses):
+            weight_per_class[i] = N/float(count[i])
+        weight = [0] * len(targets)
+        for idx, val in enumerate(targets):
+            weight[idx] = weight_per_class[val]
+        return weight
+
 
 def copy_G_params(model):
     flatten = deepcopy(list(p.data for p in model.parameters()))
     return flatten
-    
+
 
 def load_params(model, new_param):
     for p, new_p in zip(model.parameters(), new_param):
@@ -47,14 +88,14 @@ def get_dir(args):
     task_name = 'train_results/' + args.name
     saved_model_folder = os.path.join( task_name, 'models')
     saved_image_folder = os.path.join( task_name, 'images')
-    
+
     os.makedirs(saved_model_folder, exist_ok=True)
     os.makedirs(saved_image_folder, exist_ok=True)
 
     for f in os.listdir('./'):
         if '.py' in f:
             shutil.copy(f, task_name+'/'+f)
-    
+
     with open( os.path.join(saved_model_folder, '../args.txt'), 'w') as f:
         json.dump(args.__dict__, f, indent=2)
 
@@ -76,7 +117,7 @@ class  ImageFolder(Dataset):
         img_names.sort()
         for i in range(len(img_names)):
             image_path = os.path.join(self.root, img_names[i])
-            if image_path[-4:] == '.jpg' or image_path[-4:] == '.png' or image_path[-5:] == '.jpeg': 
+            if image_path[-4:] == '.jpg' or image_path[-4:] == '.png' or image_path[-5:] == '.jpeg':
                 frame.append(image_path)
         return frame
 
@@ -86,9 +127,9 @@ class  ImageFolder(Dataset):
     def __getitem__(self, idx):
         file = self.frame[idx]
         img = Image.open(file).convert('RGB')
-            
+
         if self.transform:
-            img = self.transform(img) 
+            img = self.transform(img)
 
         return img
 
@@ -134,98 +175,3 @@ class MultiResolutionDataset(Dataset):
         img = self.transform(img)
 
         return img
-
-
-from queue import Queue
-from threading import Thread
-class CudaDataLoader:
-    """ 异步预先将数据从CPU加载到GPU中 """
-
-    def __init__(self, loader, device, queue_size=2):
-        self.device = device
-        self.queue_size = queue_size
-        self.loader = loader
-
-        self.load_stream = torch.cuda.Stream(device=device)
-        self.queue = Queue(maxsize=self.queue_size)
-
-        self.idx = 0
-        self.worker = Thread(target=self.load_loop)
-        self.worker.setDaemon(True)
-        self.worker.start()
-
-    def load_loop(self):
-        """ 不断的将cuda数据加载到队列里 """
-        # The loop that will load into the queue in the background
-        while True:
-            for i, sample in enumerate(self.loader):
-                self.queue.put(self.load_instance(sample))
-
-    def load_instance(self, sample):
-        """ 将batch数据从CPU加载到GPU中 """
-        if torch.is_tensor(sample):
-            with torch.cuda.stream(self.load_stream):
-                return sample.to(self.device, non_blocking=True)
-        elif sample is None or type(sample) in (list, str):
-            return sample
-        elif isinstance(sample, dict):
-            return {k: self.load_instance(v) for k, v in sample.items()}
-        else:
-            return [self.load_instance(s) for s in sample]
-
-    def __iter__(self):
-        self.idx = 0
-        return self
-
-    def __next__(self):
-        # 加载线程挂了
-        if not self.worker.is_alive() and self.queue.empty():
-            self.idx = 0
-            self.queue.join()
-            self.worker.join()
-            raise StopIteration
-        # 一个epoch加载完了
-        elif self.idx >= len(self.loader):
-            self.idx = 0
-            raise StopIteration
-        # 下一个batch
-        else:
-            out = self.queue.get()
-            self.queue.task_done()
-            self.idx += 1
-        return out
-
-    def __len__(self):
-        return len(self.loader)
-
-    @property
-    def sampler(self):
-        return self.loader.sampler
-
-    @property
-    def dataset(self):
-        return self.loader.dataset
-
-class _RepeatSampler(object):
-    """ 一直repeat的sampler """
-
-    def __init__(self, sampler):
-        self.sampler = sampler
-
-    def __iter__(self):
-        while True:
-            yield from iter(self.sampler)
-
-class MultiEpochsDataLoader(torch.utils.data.DataLoader):
-    """ 多epoch训练时，DataLoader对象不用重新建立线程和batch_sampler对象，以节约每个epoch的初始化时间 """
-    def __init__(self, *args, **kwargs):
-        super().__init__(*args, **kwargs)
-        object.__setattr__(self, 'batch_sampler', _RepeatSampler(self.batch_sampler))
-        self.iterator = super().__iter__()
-
-    def __len__(self):
-        return len(self.batch_sampler.sampler)
-
-    def __iter__(self):
-        for i in range(len(self)):
-            yield next(self.iterator)
