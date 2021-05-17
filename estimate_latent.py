@@ -107,7 +107,11 @@ if __name__ == "__main__":
                 for i in range(10):
                   optimizer.zero_grad()
                   g_imgs = net_ig(noise,condition_code)[0]
-                  loss=mse(target_image, g_imgs)
+                  target_image=target_image[0]
+                  g_imgs=torch.tensor(g_imgs, device='cuda')
+                  target_image=torch.tensor(target_image, device='cuda')
+
+                  loss=mse(target_image[0], g_imgs)
                   loss.backward()
                   optimizer.step()
                 g_imgs = net_ig(noise,condition_code)[0]
