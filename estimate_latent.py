@@ -44,7 +44,7 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser(
         description='generate images'
     )
-    parser.add_argument('--ckpt', type=str)
+    parser.add_argument('--ckpt', type=str, default='None', help='checkpoint weight path')
     parser.add_argument('--cuda', type=int, default=0, help='index of gpu to use')
     parser.add_argument('--start_iter', type=int, default=6)
     parser.add_argument('--end_iter', type=int, default=10)
@@ -53,7 +53,7 @@ if __name__ == "__main__":
     parser.add_argument('--size', type=int, default=256)
     parser.add_argument('--n_sample', type=int, default=2000)
     parser.add_argument('--big', action='store_true')
-    parser.add_argument('--im_size', type=int, default=1024)
+    parser.add_argument('--im_size', type=int, default=256)
     parser.add_argument('--condition', type=int, default=0)
     parser.set_defaults(big=False)
     args = parser.parse_args()
@@ -72,9 +72,8 @@ if __name__ == "__main__":
             transforms.Normalize(mean=[0.5, 0.5, 0.5], std=[0.5, 0.5, 0.5])
         ]
     trans = transforms.Compose(transform_list)
-    dataset = ImageFolder(root=src, transform=trans)
+    dataset = ImageFolder(root='images2', transform=trans)
     #dataloader = iter(DataLoader(dataset, batch_size=batch_size shuffle=False, sampler=InfiniteSamplerWrapper(dataset), num_workers=dataloader_workers, pin_memory=True))
-
     mse = torch.nn.MSELoss(size_average=None, reduce=None, reduction='mean')
     for epoch in [10000*i for i in range(args.start_iter, args.end_iter+1)]:
         #ckpt = './models/%d.pth'%(epoch)
