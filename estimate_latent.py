@@ -80,7 +80,6 @@ if __name__ == "__main__":
         checkpoint = torch.load(args.ckpt, map_location=lambda a,b: a)
         net_ig.load_state_dict(checkpoint['g'])
 
-        optimizer = optim.Adam(net_ig.parameters(), lr=nlr, betas=(nbeta1, 0.999))
         #load_params(net_ig, checkpoint['g_ema'])
 
         #net_ig.eval()
@@ -91,27 +90,26 @@ if __name__ == "__main__":
         del checkpoint
 
         net_ig.eval()
-        for i, (target_image, (path, category)) in enumerate(zip(dataloader,dataset.samples)):
+        for i, ((target_image, cat), (path, category)) in enumerate(zip(dataloader,dataset.samples)):
             # noiseごとにcondition0,1の画像を作成
-            noise = torch.randn(50, noise_dim).to(device).requires_grad_(True)
-
+            noise = torch.randn(1, noise_dim).to(device).requires_grad_(True)
+            target_image = target_image.to(device)
+            optimizer = optim.Adam({noise}, lr=nlr, betas=(nbeta1, 0.999))
             for condition in [0,1]:
                 if condition == 0:
-                    condition_code = F.one_hot(torch.zeros((50,),dtype=torch.int64),num_classes=2).to(device)
+                    condition_code = F.one_hot(torch.zeros((1,),dtype=torch.int64),num_classes=2).to(device)
                 else :
-                    condition_code = F.one_hot(torch.ones((50,),dtype=torch.int64),num_classes=2).to(device)
+                    condition_code = F.one_hot(torch.ones((1,),dtype=torch.int64),num_classes=2).to(device)
 
                 dist = 'eval_condition=%d_%d'%(condition,epoch)
                 dist = os.path.join(dist, 'img')
                 os.makedirs(dist, exist_ok=True)
-                for i in range(10):
+                for i in range(30):
                   optimizer.zero_grad()
                   g_imgs = net_ig(noise,condition_code)[0]
-                  target_image=target_image[0]
-                  g_imgs=torch.tensor(g_imgs, device='cuda')
-                  target_image=torch.tensor(target_image, device='cuda')
-
-                  loss=mse(target_image[0], g_imgs)
+                  #for ti in target_image:
+                    #print(ti.shape)
+                  loss=mse(target_image, g_imgs)
                   loss.backward()
                   optimizer.step()
                 g_imgs = net_ig(noise,condition_code)[0]
@@ -119,4 +117,4 @@ if __name__ == "__main__":
 
                 for j, g_img in enumerate( g_imgs ):
                     vutils.save_image(g_img.add(1).mul(0.5),
-                        os.path.join(dist, '%d.png'%(i*args.batch+j)))#, normalize=True, range=(-1,1))
+                        os.path.join(dist, '%d.png'%(i*batch_size+j)))#, normalize=True, range=(-1,1))
