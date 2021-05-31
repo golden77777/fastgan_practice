@@ -6,6 +6,7 @@ from torchvision.datasets import ImageFolder
 from torch.utils.data import DataLoader
 from torchvision import utils as vutils
 from torchvision import transforms
+import numpy as np
 
 import os
 import random
@@ -100,7 +101,6 @@ if __name__ == "__main__":
                     condition_code = F.one_hot(torch.zeros((1,),dtype=torch.int64),num_classes=2).to(device)
                 else :
                     condition_code = F.one_hot(torch.ones((1,),dtype=torch.int64),num_classes=2).to(device)
-
                 dist = 'eval_condition=%d_%d'%(condition,epoch)
                 dist = os.path.join(dist, 'img')
                 os.makedirs(dist, exist_ok=True)
@@ -118,3 +118,4 @@ if __name__ == "__main__":
                 for j, g_img in enumerate( g_imgs ):
                     vutils.save_image(g_img.add(1).mul(0.5),
                         os.path.join(dist, '%d.png'%(i*batch_size+j)))#, normalize=True, range=(-1,1))
+                    np.save("latent_W/%d_%d_%d.npy"%(condition,epoch,i*batch_size+j),noise.detach().cpu().numpy())
